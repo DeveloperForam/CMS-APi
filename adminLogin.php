@@ -2,42 +2,72 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 header("Content-Type: application/json");
 
-require 'connect.php';
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
+
+require 'connect.php'; // Database Connection
 
 $data = json_decode(file_get_contents("php://input"));
 
-if (isset($data->email) && isset($data->password)) {
-    $email = mysqli_real_escape_string($conn, $data->email);
-    $password = mysqli_real_escape_string($conn, $data->password);
+if (!isset($data->email) || !isset($data->password)) {
+    http_response_code(400); // Bad Request
+    echo json_encode(["status" => "error", "message" => "Missing email or password"]);
+    exit();
+}
 
-    $stmt = $conn->prepare("SELECT * FROM admin WHERE email = ?");
-    $stmt->bind_param("s", $email);
-    $stmt->execute();
-    $result = $stmt->get_result();
+$email = mysqli_real_escape_string($conn, $data->email);
+$password = $data->password;
 
-    if ($result->num_rows == 1) {
-        $admin = $result->fetch_assoc();
+$stmt = $conn->prepare("SELECT * FROM admin WHERE email = ?");
+$stmt->bind_param("s", $email);
+$stmt->execute();
+$result = $stmt->get_result();
 
-        if (password_verify($password, $admin['password'])) {
-            $token = base64_encode(json_encode(["email" => $email, "date" => date("Y-m-d H:i:s")]));
+if ($result->num_rows === 1) {
+    $admin = $result->fetch_assoc();
 
-            // Store Token in Database
-            $update = "UPDATE admin SET password='$token' WHERE email='$email'";
-            mysqli_query($conn, $update);
+    // Verify Password
+    if (password_verify($password, $admin['password'])) {
+        // Generate a secure random token (64 characters)
+        $token = bin2hex(random_bytes(32));
 
-            echo json_encode(["status" => "success", "token" => $token]);
+        // Set token expiry (30 minutes from now)
+        $expires_at = date("Y-m-d H:i:s", strtotime("+30 minutes"));
+
+        // Store the token and expiry in the database
+        $updateStmt = $conn->prepare("UPDATE admin SET token = ?, expires_at = ? WHERE email = ?");
+        $updateStmt->bind_param("sss", $token, $expires_at, $email);
+        
+        if ($updateStmt->execute()) {
+            echo json_encode([
+                "status" => "success",
+                "token" => $token,
+                "expires_at" => $expires_at, // Send expiry time to client
+                "user" => [
+                    "id" => $admin['id'],
+                    "email" => $admin['email']
+                ]
+            ]);
         } else {
-            echo json_encode(["status" => "error", "message" => "Invalid credentials"]);
+            http_response_code(500); // Internal Server Error
+            echo json_encode(["status" => "error", "message" => "Failed to update token"]);
         }
+        $updateStmt->close();
     } else {
+        http_response_code(401); // Unauthorized
         echo json_encode(["status" => "error", "message" => "Invalid credentials"]);
     }
 } else {
-    echo json_encode(["status" => "error", "message" => "Invalid or missing data"]);
+    http_response_code(401); // Unauthorized
+    echo json_encode(["status" => "error", "message" => "Invalid credentials"]);
 }
 
+$stmt->close();
 mysqli_close($conn);
 ?>

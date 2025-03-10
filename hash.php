@@ -1,21 +1,24 @@
 <?php
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
+require 'connect.php'; // Database Connection
 
-require 'connect.php';
+$email = "admin@gmail.com";
+$password = "123"; // Your Plain Password
 
-$password = '123'; // Your Default Password
-$hash = password_hash($password, PASSWORD_DEFAULT);
+// Hash the password securely
+$hashedPassword = password_hash($password, PASSWORD_DEFAULT);
 
-$email = 'admin@gmail.com';
+// Generate a token for the user
+$token = base64_encode(json_encode(["email" => $email]));
 
-$sql = "UPDATE admin SET password='$hash' WHERE email='$email'";
+// Insert user with hashed password and token
+$query = "INSERT INTO admin (email, password, token) VALUES ('$email', '$hashedPassword', '$token')";
 
-if (mysqli_query($conn, $sql)) {
-    echo "Password Hashed Successfully ✅";
+if (mysqli_query($conn, $query)) {
+    echo "✅ Password Hashed and Token Generated Successfully!";
 } else {
-    echo "Failed to Hash Password ❌: " . mysqli_error($conn);
+    echo "❌ Error: " . mysqli_error($conn);
 }
 
+// Close connection
 mysqli_close($conn);
 ?>
